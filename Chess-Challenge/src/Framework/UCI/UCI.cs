@@ -1,6 +1,5 @@
 ﻿using ChessChallenge.API;
 using ChessChallenge.Application;
-using ChessChallenge.Application.APIHelpers;
 using ChessChallenge.Chess;
 using System;
 
@@ -13,7 +12,6 @@ namespace ChessChallenge.UCI {
     public UCIBot(IChessBot bot, ChallengeController.PlayerType type) {
       this.bot = bot;
       this.type = type;
-      moveGen = new APIMoveGen();
       board = new Chess.Board();
     }
 
