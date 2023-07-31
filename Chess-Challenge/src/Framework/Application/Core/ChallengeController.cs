@@ -16,7 +16,7 @@ namespace ChessChallenge.Application {
         public enum PlayerType
         {
             Human,
-            MyBot,
+            NarvvhalBot,
             EvilBot
         }
 
@@ -74,12 +74,12 @@ namespace ChessChallenge.Application {
             botMatchStartFens = FileHelper.ReadResourceFile("Fens.txt").Split('\n');
             botTaskWaitHandle = new AutoResetEvent(false);
 
-            StartNewGame(PlayerType.Human, PlayerType.MyBot);
+            StartNewGame(PlayerType.Human, PlayerType.NarvvhalBot);
         }
 
     public static ChessChallenge.API.IChessBot? CreateBot(PlayerType type) {
       return type switch {
-        PlayerType.MyBot => new MyBot(),
+        PlayerType.NarvvhalBot => new MyBot(),
         PlayerType.EvilBot => new EvilBot(),
         // If you have other bot types, you can add them here as well
         _ => null
@@ -222,7 +222,7 @@ namespace ChessChallenge.Application {
         {
             return type switch
             {
-                PlayerType.MyBot => new ChessPlayer(new MyBot(), type, GameDurationMilliseconds),
+                PlayerType.NarvvhalBot => new ChessPlayer(new MyBot(), type, GameDurationMilliseconds),
                 PlayerType.EvilBot => new ChessPlayer(new EvilBot(), type, GameDurationMilliseconds),
                 _ => new ChessPlayer(new HumanPlayer(boardUI), type)
             };
