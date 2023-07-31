@@ -7,12 +7,11 @@ using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using static ChessChallenge.Application.Settings;
 using static ChessChallenge.Application.ConsoleHelper;
+using static ChessChallenge.Application.Settings;
 
-namespace ChessChallenge.Application
-{
-    public class ChallengeController
+namespace ChessChallenge.Application {
+  public class ChallengeController
     {
         public enum PlayerType
         {
@@ -22,7 +21,6 @@ namespace ChessChallenge.Application
         }
 
         // Game state
-        readonly Random rng;
         int gameID;
         bool isPlaying;
         Board board;
@@ -79,7 +77,16 @@ namespace ChessChallenge.Application
             StartNewGame(PlayerType.Human, PlayerType.MyBot);
         }
 
-        public void StartNewGame(PlayerType whiteType, PlayerType blackType)
+    public static ChessChallenge.API.IChessBot? CreateBot(PlayerType type) {
+      return type switch {
+        PlayerType.MyBot => new MyBot(),
+        PlayerType.EvilBot => new EvilBot(),
+        // If you have other bot types, you can add them here as well
+        _ => null
+      };
+    }
+
+    public void StartNewGame(PlayerType whiteType, PlayerType blackType)
         {
             // End any ongoing game
             EndGame(GameResult.DrawByArbiter, log: false, autoStartNextBotMatch: false);

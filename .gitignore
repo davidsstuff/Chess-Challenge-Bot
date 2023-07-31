@@ -396,3 +396,4 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+Chess-Challenge/src/Evil Bot/EvilBot.cs
