@@ -18,7 +18,7 @@ namespace ChessChallenge.Example {
       }
     }
 
-    int[] pieceScores = { 0, 100, 300, 300, 500, 900, 20000 };
+    int[] pieceScores = { 0, 115, 305, 320, 500, 910, 20000 };
     Board _board;
     const ulong entries = (1 << 19) - 1;
     TTEntry[] table = new TTEntry[entries];
@@ -73,6 +73,7 @@ namespace ChessChallenge.Example {
       // White Pair
       if (bishopPairs % 5 == 4)
         score += 50;
+      // Black Pair
       if (bishopPairs >= 10)
         score -= 50;
 
@@ -86,7 +87,7 @@ namespace ChessChallenge.Example {
       TTEntry entry = table[key % entries];
       int Big_Delta = (pieceScores[5] * 2) - pieceScores[1]; // promote to a queen, whilst taking a queen
 
-      Move[] legalMoves = _board.GetLegalMoves(searchDepth <= 0);
+      var legalMoves = _board.GetLegalMoves(searchDepth <= 0);
 
       if (searchDepth > 0 && legalMoves.Length == 0)
         return _board.IsInCheck() ? -maxNum + movesMade : 0;
@@ -131,7 +132,7 @@ namespace ChessChallenge.Example {
       // <rank moves>
 
       Move bestMove = entry.key == key ? entry.bestMove : Move.NullMove;
-      int[] moveScores = new int[legalMoves.Length];
+      var moveScores = new int[legalMoves.Length];
       for (int i = 0; i < legalMoves.Length; i++) {
         // <hash Move />
         if (legalMoves[i] == bestMove)

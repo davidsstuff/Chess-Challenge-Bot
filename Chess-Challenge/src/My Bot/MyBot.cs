@@ -16,7 +16,7 @@ public class MyBot : IChessBot {
     }
   }
 
-  int[] pieceScores = { 0, 100, 300, 300, 500, 900, 20000 };
+  int[] pieceScores = { 0, 115, 305, 320, 500, 910, 20000 };
   Board _board;
   const ulong entries = (1 << 19) - 1;
   TTEntry[] table = new TTEntry[entries];
@@ -71,6 +71,7 @@ public class MyBot : IChessBot {
     // White Pair
     if (bishopPairs % 5 == 4)
       score += 50;
+    // Black Pair
     if (bishopPairs >= 10)
       score -= 50;
 
@@ -82,9 +83,9 @@ public class MyBot : IChessBot {
       return 0;
     ulong key = _board.ZobristKey;
     TTEntry entry = table[key % entries];
-    int Big_Delta = (pieceScores[5] * 2) - pieceScores[1]; // promote to a queen, whilst taking a queen
+    int Big_Delta = (pieceScores[5] * 2) - pieceScores[1], upperBound, lowerBound; // promote to a queen, whilst taking a queen
 
-    Move[] legalMoves = _board.GetLegalMoves(searchDepth <= 0);
+    var legalMoves = _board.GetLegalMoves(searchDepth <= 0);
 
     if (searchDepth > 0 && legalMoves.Length == 0)
       return _board.IsInCheck() ? -maxNum + movesMade : 0;
@@ -94,10 +95,15 @@ public class MyBot : IChessBot {
 
     // <reverse futility pruning />
     int eval;
-    if (entry.key == key)
+    if (entry.key == key) {
       eval = entry.score;
-    else
+      upperBound = eval + 100;
+      lowerBound = eval - 100;
+    } else {
       eval = Evaluate();
+      upperBound = beta;
+      lowerBound = alpha;
+    }
 
     if (eval - Big_Delta >= beta)
       return eval;
@@ -129,7 +135,7 @@ public class MyBot : IChessBot {
     // <rank moves>
 
     Move bestMove = entry.key == key ? entry.bestMove : Move.NullMove;
-    int[] moveScores = new int[legalMoves.Length];
+    var moveScores = new int[legalMoves.Length];
     for (int i = 0; i < legalMoves.Length; i++) {
       // <hash Move />
       if (legalMoves[i] == bestMove)
@@ -148,45 +154,53 @@ public class MyBot : IChessBot {
     // </rank moves>
 
     // <tree search>
-    bestMove = legalMoves.Length > 0 ? legalMoves[0] : Move.NullMove;
-    for (int i = 0; i < legalMoves.Length; i++) {
-      // <sort moves>
-      for (int j = i + 1; j < legalMoves.Length; j++) {
-        if (moveScores[j] > moveScores[i])
-          (moveScores[i], moveScores[j], legalMoves[i], legalMoves[j]) = (moveScores[j], moveScores[i], legalMoves[j], legalMoves[i]);
-      }
-      // </sort moves>
+    bestMove = Move.NullMove;
+    while (bestMove == Move.NullMove) {
+      for (int i = 0; i < legalMoves.Length; i++) {
+        // <sort moves>
+        for (int j = i + 1; j < legalMoves.Length; j++) {
+          if (moveScores[j] > moveScores[i])
+            (moveScores[i], moveScores[j], legalMoves[i], legalMoves[j]) = (moveScores[j], moveScores[i], legalMoves[j], legalMoves[i]);
+        }
+        // </sort moves>
 
-      if (_timer.MillisecondsElapsedThisTurn > _timer.MillisecondsRemaining / 30)
-        return -maxNum;
+        if (_timer.MillisecondsElapsedThisTurn > _timer.MillisecondsRemaining / 30)
+          return -maxNum;
 
-      Move legalMove = legalMoves[i];
-      _board.MakeMove(legalMove);
-      // <late move reduction />
-      if (moveScores[i] <= 10 && searchDepth >= 3) {
-        eval = -SearchFunction(searchDepth - 3, -colour, movesMade + 1, -beta, -alpha);
-        if (eval > alpha)
-          eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -beta, -alpha);
-      } else
-        eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -beta, -alpha);
-      _board.UndoMove(legalMove);
-      // Fail high and add to killer move array
-      if (eval >= beta) {
-        killerMoves[movesMade % killerMoveMaxSize] = legalMove;
-        return eval;
+        Move legalMove = legalMoves[i];
+        _board.MakeMove(legalMove);
+        // <late move reduction />
+        if (moveScores[i] <= 10 && searchDepth >= 3) {
+          eval = -SearchFunction(searchDepth - 3, -colour, movesMade + 1, -upperBound, -lowerBound);
+          if (eval > alpha)
+            eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -upperBound, -lowerBound);
+        } else
+          eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -upperBound, -lowerBound);
+        _board.UndoMove(legalMove);
+        // Fail high and add to killer move array
+        if (eval >= upperBound) {
+          killerMoves[movesMade % killerMoveMaxSize] = legalMove;
+          if (upperBound == beta)
+            return eval;
+          moveScores[i] = 1000000000;
+          upperBound = beta;
+          i = 0;
+        }
+        if (eval > lowerBound) {
+          bestMove = legalMove;
+          lowerBound = eval;
+          if (movesMade == 0)
+            _bestMove = bestMove;
+        }
       }
-      if (eval > alpha) {
-        bestMove = legalMove;
-        alpha = eval;
-        if (movesMade == 0)
-          _bestMove = bestMove;
-      }
+      if (bestMove == Move.NullMove)
+        lowerBound = alpha;
     }
     // </tree search>
 
-    table[key % entries] = new TTEntry(key, alpha, searchDepth, bestMove);
+    table[key % entries] = new TTEntry(key, lowerBound, searchDepth, bestMove);
 
-    return alpha;
+    return lowerBound;
   }
 
   public Move Think(Board board, Timer timer) {
@@ -202,3 +216,5 @@ public class MyBot : IChessBot {
     return _bestMove == Move.NullMove ? _board.GetLegalMoves()[0] : _bestMove;
   }
 }
+// Command for cutechess
+// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=1+0.08 -concurrency 5 -maxmoves 200 -rounds 2500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
