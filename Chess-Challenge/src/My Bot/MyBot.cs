@@ -1,4 +1,5 @@
 ﻿using ChessChallenge.API;
+using System;
 using System.Numerics;
 
 public class MyBot : IChessBot {
@@ -83,7 +84,7 @@ public class MyBot : IChessBot {
       return 0;
     ulong key = _board.ZobristKey;
     TTEntry entry = table[key % entries];
-    int Big_Delta = (pieceScores[5] * 2) - pieceScores[1], upperBound, lowerBound; // promote to a queen, whilst taking a queen
+    int Big_Delta = (pieceScores[5] * 2) - pieceScores[1], upperBound, lowerBound, bestScore = -maxNum; // promote to a queen, whilst taking a queen
 
     var legalMoves = _board.GetLegalMoves(searchDepth <= 0);
 
@@ -92,8 +93,7 @@ public class MyBot : IChessBot {
 
     if (entry.key == key && entry.depth >= searchDepth && movesMade > 0)
       return entry.score;
-
-    // <reverse futility pruning />
+    
     int eval;
     if (entry.key == key) {
       eval = entry.score;
@@ -105,17 +105,18 @@ public class MyBot : IChessBot {
       lowerBound = alpha;
     }
 
+    // <reverse futility pruning />
     if (eval - Big_Delta >= beta)
-      return eval;
+      return eval - Big_Delta;
 
     // <quiescence search>
     if (searchDepth <= 0) {
 
-      if (eval >= beta || eval < alpha - Big_Delta)
+      if (eval >= beta || eval < alpha - Big_Delta || legalMoves.Length == 0)
         return eval;
 
-      if (alpha < eval)
-        alpha = eval;
+      if (lowerBound < eval)
+        lowerBound = eval;
     }
     // </quiescence search>
 
@@ -169,12 +170,8 @@ public class MyBot : IChessBot {
 
         Move legalMove = legalMoves[i];
         _board.MakeMove(legalMove);
-        // <late move reduction />
-        if (moveScores[i] <= 10 && searchDepth >= 3) {
-          eval = -SearchFunction(searchDepth - 3, -colour, movesMade + 1, -upperBound, -lowerBound);
-          if (eval > alpha)
-            eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -upperBound, -lowerBound);
-        } else
+        eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -(lowerBound + 1), -lowerBound);
+        if (eval > lowerBound && eval < upperBound)
           eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -upperBound, -lowerBound);
         _board.UndoMove(legalMove);
         // Fail high and add to killer move array
@@ -186,9 +183,11 @@ public class MyBot : IChessBot {
           upperBound = beta;
           i = 0;
         }
-        if (eval > lowerBound) {
+        if (eval > bestScore) {
           bestMove = legalMove;
-          lowerBound = eval;
+          bestScore = eval;
+          if (eval > lowerBound)
+            lowerBound = eval;
           if (movesMade == 0)
             _bestMove = bestMove;
         }
@@ -198,9 +197,9 @@ public class MyBot : IChessBot {
     }
     // </tree search>
 
-    table[key % entries] = new TTEntry(key, lowerBound, searchDepth, bestMove);
+    table[key % entries] = new TTEntry(key, bestScore, searchDepth, bestMove);
 
-    return lowerBound;
+    return bestScore;
   }
 
   public Move Think(Board board, Timer timer) {
@@ -217,4 +216,4 @@ public class MyBot : IChessBot {
   }
 }
 // Command for cutechess
-// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=1+0.08 -concurrency 5 -maxmoves 200 -rounds 2500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
+// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=8+0.08 -concurrency 7 -maxmoves 200 -rounds 2500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
