@@ -97,6 +97,7 @@ namespace ChessChallenge.API
 				repetitionTable.TryPop();
 				board.UndoMove(new Chess.Move(move.RawValue), inSearch: true);
                 OnPositionChanged();
+				depth--;
 			}
 		}
 
@@ -174,8 +175,12 @@ namespace ChessChallenge.API
 		{
 			bool includeQuietMoves = !capturesOnly;
 			moveGen.GenerateMoves(ref moveList, board, includeQuietMoves);
-            hasCachedMoveCount = true;
-            cachedMoveCount = moveList.Length;
+
+			if (!capturesOnly)
+			{
+				hasCachedMoveCount = true;
+				cachedMoveCount = moveList.Length;
+			}
         }
 
 
