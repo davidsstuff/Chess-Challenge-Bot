@@ -1,82 +1,56 @@
 ﻿using ChessChallenge.API;
 using System;
-using System.Numerics;
 
 public class MyBot : IChessBot {
   struct TTEntry {
     public ulong key;
-    public int score;
-    public int depth;
+    public int score, depth, flag;
+    // Flag values: 0=VALID, 1=LBOUND, 2=UBOUND
     public Move bestMove;
 
-    public TTEntry(ulong _key, int _score, int _depth, Move _bestMove) {
+    public TTEntry(ulong _key, int _score, int _depth, Move _bestMove, int _flag) {
       key = _key;
       score = _score;
       depth = _depth;
       bestMove = _bestMove;
+      flag = _flag;
     }
   }
 
-  int[] pieceScores = { 0, 115, 305, 320, 500, 910, 20000 };
+  int[] pieceVal = { 0, 100, 300, 300, 500, 900, 20000 };
   Board _board;
   const ulong entries = (1 << 19) - 1;
   TTEntry[] table = new TTEntry[entries];
-  const int killerMoveMaxSize = 200;
-  Move[] killerMoves = new Move[killerMoveMaxSize];
+  int[,,] history;
   Move _bestMove;
-  int maxNum = 300000;
+  int timeRemaining, maxNum = 300000;
   Timer _timer;
 
-  public int Evaluate() {
-    int score = 0, bishopPairs = 0;
+  int[] piecePhase = { 0, 0, 1, 1, 2, 4, 0 };
+  ulong[] psts = { 657614902731556116, 420894446315227099, 384592972471695068, 312245244820264086, 364876803783607569, 366006824779723922, 366006826859316500, 786039115310605588, 421220596516513823, 366011295806342421, 366006826859316436, 366006896669578452, 162218943720801556, 440575073001255824, 657087419459913430, 402634039558223453, 347425219986941203, 365698755348489557, 311382605788951956, 147850316371514514, 329107007234708689, 402598430990222677, 402611905376114006, 329415149680141460, 257053881053295759, 291134268204721362, 492947507967247313, 367159395376767958, 384021229732455700, 384307098409076181, 402035762391246293, 328847661003244824, 365712019230110867, 366002427738801364, 384307168185238804, 347996828560606484, 329692156834174227, 365439338182165780, 386018218798040211, 456959123538409047, 347157285952386452, 365711880701965780, 365997890021704981, 221896035722130452, 384289231362147538, 384307167128540502, 366006826859320596, 366006826876093716, 366002360093332756, 366006824694793492, 347992428333053139, 457508666683233428, 329723156783776785, 329401687190893908, 366002356855326100, 366288301819245844, 329978030930875600, 420621693221156179, 422042614449657239, 384602117564867863, 419505151144195476, 366274972473194070, 329406075454444949, 275354286769374224, 366855645423297932, 329991151972070674, 311105941360174354, 256772197720318995, 365993560693875923, 258219435335676691, 383730812414424149, 384601907111998612, 401758895947998613, 420612834953622999, 402607438610388375, 329978099633296596, 67159620133902 };
+
+  int GetPstVal(int psq) => (int)(((psts[psq / 10] >> (6 * (psq % 10))) & 63) - 20) * 8;
+
+  int Evaluate(int colour) {
+    int mg = 0, eg = 0, phase = 0;
 
     foreach (bool stm in new[] { true, false }) {
       for (var p = PieceType.Pawn; p <= PieceType.King; p++) {
         int piece = (int)p, ind;
         ulong mask = _board.GetPieceBitboard(p, stm);
         while (mask != 0) {
-          score += pieceScores[piece];
-          ulong moveBitboard = 0ul;
-          ind = BitboardHelper.ClearAndGetIndexOfLSB(ref mask);
-          Square square = new(ind);
-          switch (p) {
-            case PieceType.Pawn:
-              moveBitboard = BitboardHelper.GetPawnAttacks(square, stm);
-              ulong squareInFront = (ulong)(1 << (ind + (stm ? 8 : -8))) & (_board.AllPiecesBitboard);
-              moveBitboard |= squareInFront;
-              break;
-            case PieceType.King:
-              break;
-            case PieceType.Knight:
-              moveBitboard = BitboardHelper.GetKnightAttacks(square);
-              ulong enemyPawnBitboard = _board.GetPieceBitboard(PieceType.Pawn, !stm);
-              while (enemyPawnBitboard != 0)
-                moveBitboard &= ~BitboardHelper.GetPawnAttacks(new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref enemyPawnBitboard)), !stm);
-              break;
-            case PieceType.Bishop:
-              bishopPairs += stm ? 2 : 5;
-              goto default;
-            case PieceType.Rook:
-            case PieceType.Queen:
-            default:
-              moveBitboard = BitboardHelper.GetSliderAttacks(p, square, _board);
-              break;
-          }
-          score += BitOperations.PopCount(moveBitboard) * 10;
+          phase += piecePhase[piece];
+          ind = 128 * (piece - 1) + BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ (stm ? 56 : 0);
+          mg += GetPstVal(ind) + pieceVal[piece];
+          eg += GetPstVal(ind + 64) + pieceVal[piece];
         }
       }
 
-      score = -score;
+      mg = -mg;
+      eg = -eg;
     }
 
-    // White Pair
-    if (bishopPairs % 5 == 4)
-      score += 50;
-    // Black Pair
-    if (bishopPairs >= 10)
-      score -= 50;
-
-    return score * (_board.IsWhiteToMove ? 1 : -1);
+    return (mg * phase + eg * (24 - phase)) / 24 * colour;
   }
 
   int SearchFunction(int searchDepth, int colour, int movesMade, int alpha, int beta) {
@@ -84,120 +58,93 @@ public class MyBot : IChessBot {
       return 0;
     ulong key = _board.ZobristKey;
     TTEntry entry = table[key % entries];
-    int Big_Delta = (pieceScores[5] * 2) - pieceScores[1], upperBound, lowerBound, bestScore = -maxNum; // promote to a queen, whilst taking a queen
+    int bestScore = -maxNum, eval, b; // promote to a queen, whilst taking a queen
 
     var legalMoves = _board.GetLegalMoves(searchDepth <= 0);
 
     if (searchDepth > 0 && legalMoves.Length == 0)
-      return _board.IsInCheck() ? -maxNum + movesMade : 0;
+      return _board.IsInCheckmate() ? -maxNum + movesMade : 0;
 
-    if (entry.key == key && entry.depth >= searchDepth && movesMade > 0)
-      return entry.score;
-    
-    int eval;
-    if (entry.key == key) {
-      eval = entry.score;
-      upperBound = eval + 100;
-      lowerBound = eval - 100;
-    } else {
-      eval = Evaluate();
-      upperBound = beta;
-      lowerBound = alpha;
+    bool isEntryKeyCorrect = entry.key == key;
+    if (isEntryKeyCorrect && entry.depth >= searchDepth && movesMade > 0) {
+      switch (entry.flag) {
+        case 0:
+          return entry.score;
+        case 1:
+          alpha = Math.Max(alpha, entry.score);
+          break;
+        case 2:
+          beta = Math.Min(beta, entry.score);
+          break;
+      }
+      if (alpha >= beta)
+        return entry.score;
     }
-
-    // <reverse futility pruning />
-    if (eval - Big_Delta >= beta)
-      return eval - Big_Delta;
 
     // <quiescence search>
     if (searchDepth <= 0) {
-
-      if (eval >= beta || eval < alpha - Big_Delta || legalMoves.Length == 0)
-        return eval;
-
-      if (lowerBound < eval)
-        lowerBound = eval;
+      bestScore = Evaluate(colour); // used to be eval, switching to best score improved massively
+      if (bestScore > alpha)
+        alpha = bestScore;
+      if (alpha >= beta)
+        return alpha;
     }
     // </quiescence search>
 
-    // <null move pruning>
-
-    if (movesMade >= 4) {
-      if (_board.TrySkipTurn()) {
-        eval = -SearchFunction(searchDepth - 3, -colour, movesMade + 1, -beta, -alpha);
-        _board.UndoSkipTurn();
-        if (eval >= beta)
-          return eval;
-      }
-    }
-
-    // </null move pruning>
-
     // <rank moves>
-
-    Move bestMove = entry.key == key ? entry.bestMove : Move.NullMove;
+    Move bestMove = isEntryKeyCorrect ? entry.bestMove : Move.NullMove, legalMove;
     var moveScores = new int[legalMoves.Length];
     for (int i = 0; i < legalMoves.Length; i++) {
+      legalMove = legalMoves[i];
       // <hash Move />
-      if (legalMoves[i] == bestMove)
+      if (legalMove == bestMove)
         moveScores[i] = 100000;
       // <mvv-lva />
-      else if (legalMoves[i].IsCapture)
-        moveScores[i] = (10 * pieceScores[(int)legalMoves[i].CapturePieceType]) - pieceScores[(int)legalMoves[i].MovePieceType];
-      // <killer moves />
-      else if (killerMoves[movesMade % killerMoveMaxSize] == legalMoves[i])
-        moveScores[i] = 10;
+      else if (legalMove.IsCapture)
+        moveScores[i] = 10 * pieceVal[(int)legalMove.CapturePieceType] - pieceVal[(int)legalMove.MovePieceType];
       // <default value />
       else
-        moveScores[i] = 0;
+        moveScores[i] = history[Math.Max(colour, 0), legalMove.StartSquare.Index, legalMove.TargetSquare.Index];
     }
-
     // </rank moves>
 
     // <tree search>
-    bestMove = Move.NullMove;
-    while (bestMove == Move.NullMove) {
-      for (int i = 0; i < legalMoves.Length; i++) {
-        // <sort moves>
-        for (int j = i + 1; j < legalMoves.Length; j++) {
-          if (moveScores[j] > moveScores[i])
-            (moveScores[i], moveScores[j], legalMoves[i], legalMoves[j]) = (moveScores[j], moveScores[i], legalMoves[j], legalMoves[i]);
-        }
-        // </sort moves>
-
-        if (_timer.MillisecondsElapsedThisTurn > _timer.MillisecondsRemaining / 30)
-          return -maxNum;
-
-        Move legalMove = legalMoves[i];
-        _board.MakeMove(legalMove);
-        eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -(lowerBound + 1), -lowerBound);
-        if (eval > lowerBound && eval < upperBound)
-          eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -upperBound, -lowerBound);
-        _board.UndoMove(legalMove);
-        // Fail high and add to killer move array
-        if (eval >= upperBound) {
-          killerMoves[movesMade % killerMoveMaxSize] = legalMove;
-          if (upperBound == beta)
-            return eval;
-          moveScores[i] = 1000000000;
-          upperBound = beta;
-          i = 0;
-        }
-        if (eval > bestScore) {
-          bestMove = legalMove;
-          bestScore = eval;
-          if (eval > lowerBound)
-            lowerBound = eval;
-          if (movesMade == 0)
-            _bestMove = bestMove;
-        }
+    b = beta;
+    for (int i = 0; i < legalMoves.Length; i++) {
+      // <sort moves>
+      for (int j = i + 1; j < legalMoves.Length; j++) {
+        if (moveScores[j] > moveScores[i])
+          (moveScores[i], moveScores[j], legalMoves[i], legalMoves[j]) = (moveScores[j], moveScores[i], legalMoves[j], legalMoves[i]);
       }
-      if (bestMove == Move.NullMove)
-        lowerBound = alpha;
+      // </sort moves>
+
+      if (_timer.MillisecondsElapsedThisTurn > timeRemaining)
+        return -maxNum;
+
+      legalMove = legalMoves[i];
+      _board.MakeMove(legalMove);
+      eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -b, -alpha);
+      if (eval > alpha && eval < beta && i > 0)
+        eval = -SearchFunction(searchDepth - 1, -colour, movesMade + 1, -beta, -alpha);
+      _board.UndoMove(legalMove);
+      if (eval > bestScore) {
+        bestMove = legalMove;
+        bestScore = eval;
+        if (eval >= beta) {
+          if (!legalMove.IsCapture)
+            history[Math.Max(colour, 0), legalMove.StartSquare.Index, legalMove.TargetSquare.Index] += 1 << searchDepth;
+          break;
+        }
+        if (eval > alpha)
+          alpha = eval;
+        if (movesMade == 0 && bestScore != maxNum)
+          _bestMove = bestMove;
+      }
+      b = alpha + 1;
     }
     // </tree search>
-
-    table[key % entries] = new TTEntry(key, bestScore, searchDepth, bestMove);
+    int flag = bestScore >= beta ? 1 : bestScore <= alpha ? 2 : 0;
+    table[key % entries] = new TTEntry(key, bestScore, searchDepth, bestMove, flag);
 
     return bestScore;
   }
@@ -205,15 +152,24 @@ public class MyBot : IChessBot {
   public Move Think(Board board, Timer timer) {
     _board = board;
     _timer = timer;
-    _bestMove = Move.NullMove;
-    int colour = board.IsWhiteToMove ? 1 : -1;
+    history = new int[2, 64, 64];
+    int alpha = -50, beta = 50, colour = board.IsWhiteToMove ? 1 : -1, score, epsilon = 50;
     sbyte depth = 1;
-    while (timer.MillisecondsElapsedThisTurn < timer.MillisecondsRemaining / 30) {
-      SearchFunction(depth, colour, 0, -maxNum, maxNum);
-      ++depth;
+    timeRemaining = timer.MillisecondsRemaining / 25;
+    while (timer.MillisecondsElapsedThisTurn < timeRemaining / 2) {
+      score = SearchFunction(depth, colour, 0, alpha, beta);
+      if (score > beta || score < alpha) {
+        alpha = -maxNum;
+        beta = maxNum;
+      } else {
+        alpha = score - epsilon;
+        beta = score + epsilon;
+        ++depth;
+      }
     }
-    return _bestMove == Move.NullMove ? _board.GetLegalMoves()[0] : _bestMove;
+
+    return _bestMove;
   }
 }
 // Command for cutechess
-// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=8+0.08 -concurrency 7 -maxmoves 200 -rounds 2500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
+// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=10+0.1 -concurrency 6 -maxmoves 200 -rounds 500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
