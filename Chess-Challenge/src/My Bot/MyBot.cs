@@ -1,6 +1,5 @@
 ﻿using ChessChallenge.API;
 using System;
-using System.Linq;
 
 public class MyBot : IChessBot {
   struct TTEntry {
@@ -61,7 +60,7 @@ public class MyBot : IChessBot {
       return -maxNum + movesMade;
     ulong key = _board.ZobristKey;
     TTEntry entry = table[key % entries];
-    int bestScore = -maxNum, eval, b, flag = 0;
+    int bestScore = -maxNum, eval, b;
 
     bool isEntryKeyCorrect = entry.key == key;
     if (isEntryKeyCorrect && entry.depth >= searchDepth && movesMade > 0) {
@@ -90,59 +89,54 @@ public class MyBot : IChessBot {
     // </quiescence search>
 
     // <rank moves>
-    Move bestMove = isEntryKeyCorrect ? entry.bestMove : Move.NullMove;
+    Move bestMove = isEntryKeyCorrect ? entry.bestMove : Move.NullMove, move;
+    Span<Move> legalMoves = stackalloc Move[256];
+    _board.GetLegalMovesNonAlloc(ref legalMoves, searchDepth <= 0);
+    Span<int> moveScores = stackalloc int[legalMoves.Length];
+    for (int i = 0; i < legalMoves.Length; i++) {
+      move = legalMoves[i];
+      // <hash Move />
+      moveScores[i] = move == bestMove
+        ? -10000000
+        : move.IsCapture
+        ? -(100 * pieceVal[(int)move.CapturePieceType] - pieceVal[(int)move.MovePieceType])
+        : history[Math.Max(colour, 0), move.StartSquare.Index, move.TargetSquare.Index];
+    }
+    // </rank moves>
+    moveScores.Sort(legalMoves);
 
+    // <tree search>
     b = beta;
-    while (flag >= 0) {
+    for (int i = 0; i < legalMoves.Length; i++) {
 
-      // <tree search>
-      Move[] legalMoves = { };
-      if (flag == 0 && isEntryKeyCorrect && bestMove != Move.NullMove) {
-        legalMoves = new Move[] { bestMove };
-        flag = 1;
-      } else {
-        if (flag <= 1) {
-          legalMoves = _board.GetLegalMoves(true);
-          flag = searchDepth > 0 ? 2 : -1;
-        } else if (searchDepth > 0) {
-          legalMoves = _board.GetLegalMoves();
-          flag = -1;
+      if (_timer.MillisecondsElapsedThisTurn > timeRemaining)
+        return -maxNum;
+
+      move = legalMoves[i];
+      _board.MakeMove(move);
+      int extension = totalExtensions < 16 && _board.IsInCheck() ? 1 : 0;
+      int reduction = i <= 3 || move.IsCapture || move.IsPromotion || extension > 0 ? 0 : i < 6 ? 1 : searchDepth / 3;
+      eval = -SearchFunction(searchDepth - 1 + extension - reduction, -colour, movesMade + 1, -b, -alpha, totalExtensions + extension);
+      if (eval > alpha && eval < beta)
+        eval = -SearchFunction(searchDepth - 1 + extension, -colour, movesMade + 1, -beta, -alpha, totalExtensions + extension);
+      _board.UndoMove(move);
+      if (eval > bestScore) {
+        bestMove = move;
+        bestScore = eval;
+        if (eval >= beta) {
+          if (!move.IsCapture)
+            history[Math.Max(colour, 0), move.StartSquare.Index, move.TargetSquare.Index] -= 1 << searchDepth;
+          break;
         }
-        legalMoves = legalMoves.OrderByDescending(move => !move.IsCapture
-          ? history[Math.Max(colour, 0), move.StartSquare.Index, move.TargetSquare.Index]
-          : 100 * pieceVal[(int)move.CapturePieceType] - pieceVal[(int)move.MovePieceType]).ToArray();
+        if (eval > alpha)
+          alpha = eval;
+        if (movesMade == 0 && bestScore != maxNum)
+          _bestMove = bestMove;
       }
-
-      foreach (Move legalMove in legalMoves) {
-        _board.MakeMove(legalMove);
-        int extension = totalExtensions < 16 && _board.IsInCheck() ? 1 : 0;
-        eval = -SearchFunction(searchDepth - 1 + extension, -colour, movesMade + 1, -b, -alpha, totalExtensions + extension);
-        if (eval > alpha && eval < beta && flag != 1)
-          eval = -SearchFunction(searchDepth - 1 + extension, -colour, movesMade + 1, -beta, -alpha, totalExtensions + extension);
-        _board.UndoMove(legalMove);
-
-        if (_timer.MillisecondsElapsedThisTurn > timeRemaining)
-          return -maxNum;
-
-        if (eval > bestScore) {
-          bestMove = legalMove;
-          bestScore = eval;
-          if (eval >= beta) {
-            if (!legalMove.IsCapture)
-              history[Math.Max(colour, 0), legalMove.StartSquare.Index, legalMove.TargetSquare.Index] += 1 << searchDepth;
-            flag = -1;
-            break;
-          }
-          if (eval > alpha)
-            alpha = eval;
-          if (movesMade == 0 && bestScore != maxNum)
-            _bestMove = bestMove;
-        }
-        b = alpha + 1;
-      }
+      b = alpha + 1;
     }
     // </tree search>
-    flag = bestScore >= beta ? 1 : bestScore <= alpha ? 2 : 0;
+    int flag = bestScore >= beta ? 1 : bestScore <= alpha ? 2 : 0;
     table[key % entries] = new TTEntry(key, bestScore, searchDepth, bestMove, flag);
 
     return bestScore;
@@ -173,4 +167,4 @@ public class MyBot : IChessBot {
   }
 }
 // Command for cutechess
-// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=10+0.1 -concurrency 6 -maxmoves 200 -rounds 500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
+// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="NarvvhalsBot" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="EvilBot" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=1+1 -concurrency 6 -maxmoves 200 -rounds 500 -ratinginterval 10 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2
