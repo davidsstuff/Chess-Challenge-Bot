@@ -110,7 +110,7 @@ public class MyBot : IChessBot {
     for (int i = 0; i < legalMoves.Length; i++) {
 
       if (_timer.MillisecondsElapsedThisTurn > timeRemaining)
-        return -maxNum;
+        return maxNum;
 
       move = legalMoves[i];
       _board.MakeMove(move);
@@ -130,7 +130,7 @@ public class MyBot : IChessBot {
         }
         if (eval > alpha)
           alpha = eval;
-        if (movesMade == 0 && bestScore != maxNum)
+        if (movesMade == 0)
           _bestMove = bestMove;
       }
       b = alpha + 1;
