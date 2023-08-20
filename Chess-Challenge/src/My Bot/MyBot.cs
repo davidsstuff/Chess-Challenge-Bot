@@ -16,7 +16,7 @@ public class MyBot : IChessBot {
   int[,,] moveHistoryTable;
   Move _bestMove;
   int TimeRemaining => globalTimer.MillisecondsRemaining / 50;
-  int maximumScore = 300000, bishopIncrease = 44, startingDepth = 1, mobilityWeight = 9, aspirationWindow = 412;
+  int maximumScore = 30000, bishopIncrease = 50, startingDepth = 1, mobilityWeight = 10, aspirationWindow = 200;
   Timer globalTimer;
 
   public int RawEvaluation() {
@@ -66,11 +66,12 @@ public class MyBot : IChessBot {
       return 0;
     if (globalBoard.IsInCheckmate())
       return -maximumScore + plyFromRoot;
-    uint key = (uint)(globalBoard.ZobristKey >> 32);
-    TTEntry currentTableEntry = transpositionTable[key & tableEntries];
+    uint tableKey = (uint)(globalBoard.ZobristKey >> 32);
+    TTEntry currentTableEntry = transpositionTable[tableKey & tableEntries];
 
-    bool isEntryKeyCorrect = currentTableEntry.Key == key, 
-      isPVNode = beta - alpha > 1, canReduceNode = false, 
+    bool isEntryKeyCorrect = currentTableEntry.Key == tableKey, 
+      isPVNode = beta - alpha > 1,
+      isReducedNode = false, 
       isQuiescenceSearch = searchDepth <= 0, 
       isPlayerInCheck = globalBoard.IsInCheck();
     int bestScore = -maximumScore, eval = 0, zeroWidthBeta, extension = totalExtensions < 16 && isPlayerInCheck ? 1 : 0;
@@ -100,13 +101,12 @@ public class MyBot : IChessBot {
     }
     // </quiescence search>
     else if (!(isPVNode || isPlayerInCheck)) {
-      canReduceNode = searchDepth >= 3;
-
       globalBoard.TrySkipTurn();
       Search(beta, 2);
       globalBoard.UndoSkipTurn();
       if (eval >= beta)
         return eval;
+      isReducedNode = searchDepth >= 3;
     }
     // <rank moves>
     Move bestMove = isEntryKeyCorrect ? currentTableEntry.BestMove : Move.NullMove, moveToEvaluate;
@@ -134,7 +134,7 @@ public class MyBot : IChessBot {
       // split out from the other condition to avoid doing a zero width search needlessly
       if (isQuiescenceSearch || movesChecked == 0)
         Search(beta);
-      else if ((globalBoard.IsInCheck() || !canReduceNode || moveToEvaluate.IsCapture || moveToEvaluate.IsPromotion
+      else if ((globalBoard.IsInCheck() || !isReducedNode || moveToEvaluate.IsCapture || moveToEvaluate.IsPromotion
                   ? eval = alpha + 1 
                   : Search(alpha + 1, movesChecked / 7 + searchDepth / 7)) > alpha
               && alpha < Search(alpha + 1))
@@ -160,7 +160,7 @@ public class MyBot : IChessBot {
       zeroWidthBeta = alpha + 1;
     }
     // </tree search>
-    transpositionTable[key & tableEntries] = new TTEntry(key,
+    transpositionTable[tableKey & tableEntries] = new TTEntry(tableKey,
                                        (short)bestScore,
                                        (sbyte)searchDepth,
                                        bestMove,
