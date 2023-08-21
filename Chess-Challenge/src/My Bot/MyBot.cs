@@ -9,7 +9,7 @@ public class MyBot : IChessBot {
                         Move BestMove,
                         byte Flag);
 
-  int[] pieceValues = { 0, 74, 307, 322, 507, 847, 0, 129, 287, 317, 457, 931, 0 }, phaseWeight = { 0, 0, 1, 1, 2, 4, 0 };
+  int[] pieceValues = { 0, 110, 307, 322, 507, 847, 0, 129, 287, 317, 457, 931, 0 }, phaseWeight = { 0, 0, 1, 1, 2, 4, 0 };
   Board globalBoard;
   int tableEntries = 0x7fffff;
   TTEntry[] transpositionTable = new TTEntry[0x800000];
@@ -58,7 +58,7 @@ public class MyBot : IChessBot {
       canReduceNode = false,
       isQuiescenceSearch = searchDepth <= 0,
       isPlayerInCheck = globalBoard.IsInCheck();
-    int bestScore = -maximumScore, eval = 0, extension = isPlayerInCheck && plyFromRoot < 50 ? 1 : 0;
+    int bestScore = -maximumScore, eval = 0, extension = isPlayerInCheck && plyFromRoot < 16 ? 1 : 0;
 
     int Search(int newBeta, int r = 0) => eval = -SearchPosition(searchDepth - 1 + extension - r, plyFromRoot + 1, -newBeta, -alpha);
     if (isEntryKeyCorrect && currentTableEntry.Depth >= searchDepth) {
@@ -158,7 +158,7 @@ public class MyBot : IChessBot {
     Span<Move> legalMoves = stackalloc Move[256];
     board.GetLegalMovesNonAlloc(ref legalMoves);
     Span<int> moveScores = stackalloc int[legalMoves.Length];
-    while (timer.MillisecondsElapsedThisTurn < TimeRemaining / 2) {
+    while (timer.MillisecondsElapsedThisTurn < TimeRemaining / 2 && iterativeSearchDepth < 50) {
       moveScores.Fill(-maximumScore);
       for (int i = legalMoves.Length - 1; i >= 0; i--) {
         board.MakeMove(legalMoves[i]);
@@ -190,4 +190,4 @@ public class MyBot : IChessBot {
   }
 }
 // Command for cutechess
-// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="New" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="Old" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=8+0.08 -concurrency 5 -maxmoves 200 -rounds 2500 -ratinginterval 20 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2 -openings file="Scand3Qd6-Qd8.pgn" order=random -recover
+// "C:\Program Files (x86)\Cute Chess\cutechess-cli.exe" -engine name="New" cmd="./Chess-Challenge" arg="uci" arg="NarvvhalBot" -engine name="Old" cmd="./Chess-Challenge" arg="uci" arg="EvilBot" -each proto=uci tc=1+0.08 -concurrency 5 -maxmoves 200 -rounds 2500 -ratinginterval 20 -repeat 2 -sprt elo0=0 elo1=10 alpha=0.05 beta=0.05 -games 2 -openings file="book.pgn" order=random -recover
