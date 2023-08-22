@@ -2,61 +2,81 @@
 using System;
 using System.Linq;
 
-public class MyBot : IChessBot
-{
+public class MyBot : IChessBot {
+  readonly int[] _pieceValues =
+      { 109, 285, 332, 486, 894, 0, 99, 327, 283, 478, 927, 0 },
+    _phaseWeight = { 0, 1, 1, 2, 4, 0 },
+    _moveScores = new int[218];
 
-  private readonly int[] _pieceValues = { 109, 285, 332, 486, 894, 0, 99, 327, 283, 478, 927, 0 }, _phaseWeight = { 0, 1, 1, 2, 4, 0 }, _moveScores = new int[218];
-  private Board _board;
-  private readonly ulong _tableEntries = 0x7fffff; // 2^23 -1
-  private readonly (uint, short, sbyte, Move, byte)[] _transpositionTable = new (uint, short, sbyte, Move, byte)[0x800000]; // 2^23
-  private int[,,] _moveHistoryTable;
-  private Move _bestMove;
-  private readonly Move[] _killerMoves = new Move[50];
-  private readonly int _maximumScore = 30000;
-  private int _timeRemaining = 0;
-  private Timer _timer;
-  private readonly int[][] _unpackedPestoTables;
+  Board _board;
+  readonly ulong _tableEntries = 0x7fffff; // 2^23 -1
+
+  readonly (uint, short, sbyte, Move, byte)[] _transpositionTable =
+    new (uint, short, sbyte, Move, byte)[0x800000]; // 2^23
+
+  int[,,] _moveHistoryTable;
+  Move _bestMove;
+  readonly Move[] _killerMoves = new Move[50];
+  readonly int _maximumScore = 30000;
+  int _timeRemaining;
+  Timer _timer;
+  readonly int[][] _unpackedPestoTables;
 
   public MyBot() =>
     // Big table packed with data from premade piece square tables
     // Access using using PackedEvaluationTables[square][pieceType] = score
     _unpackedPestoTables = new[] {
-            63746705523041458768562654720m, 71818693703096985528394040064m, 75532537544690978830456252672m, 75536154932036771593352371712m, 76774085526445040292133284352m, 3110608541636285947269332480m, 936945638387574698250991104m, 75531285965747665584902616832m,
-            77047302762000299964198997571m, 3730792265775293618620982364m, 3121489077029470166123295018m, 3747712412930601838683035969m, 3763381335243474116535455791m, 8067176012614548496052660822m, 4977175895537975520060507415m, 2475894077091727551177487608m,
-            2458978764687427073924784380m, 3718684080556872886692423941m, 4959037324412353051075877138m, 3135972447545098299460234261m, 4371494653131335197311645996m, 9624249097030609585804826662m, 9301461106541282841985626641m, 2793818196182115168911564530m,
-            77683174186957799541255830262m, 4660418590176711545920359433m, 4971145620211324499469864196m, 5608211711321183125202150414m, 5617883191736004891949734160m, 7150801075091790966455611144m, 5619082524459738931006868492m, 649197923531967450704711664m,
-            75809334407291469990832437230m, 78322691297526401047122740223m, 4348529951871323093202439165m, 4990460191572192980035045640m, 5597312470813537077508379404m, 4980755617409140165251173636m, 1890741055734852330174483975m, 76772801025035254361275759599m,
-            75502243563200070682362835182m, 78896921543467230670583692029m, 2489164206166677455700101373m, 4338830174078735659125311481m, 4960199192571758553533648130m, 3420013420025511569771334658m, 1557077491473974933188251927m, 77376040767919248347203368440m,
-            73949978050619586491881614568m, 77043619187199676893167803647m, 1212557245150259869494540530m, 3081561358716686153294085872m, 3392217589357453836837847030m, 1219782446916489227407330320m, 78580145051212187267589731866m, 75798434925965430405537592305m,
-            68369566912511282590874449920m, 72396532057599326246617936384m, 75186737388538008131054524416m, 77027917484951889231108827392m, 73655004947793353634062267392m, 76417372019396591550492896512m, 74568981255592060493492515584m, 70529879645288096380279255040m,
-        }.Select(packedTable =>
-        new System.Numerics.BigInteger(packedTable).ToByteArray().Take(12)
-                    // Using search max time since it's an integer than initializes to zero and is assgined before being used again 
-                    .Select(square => (int)((sbyte)square * 1.461) + _pieceValues[_timeRemaining++ % 12])
-                .ToArray()
+      63746705523041458768562654720m, 71818693703096985528394040064m, 75532537544690978830456252672m,
+      75536154932036771593352371712m, 76774085526445040292133284352m, 3110608541636285947269332480m,
+      936945638387574698250991104m, 75531285965747665584902616832m,
+      77047302762000299964198997571m, 3730792265775293618620982364m, 3121489077029470166123295018m,
+      3747712412930601838683035969m, 3763381335243474116535455791m, 8067176012614548496052660822m,
+      4977175895537975520060507415m, 2475894077091727551177487608m,
+      2458978764687427073924784380m, 3718684080556872886692423941m, 4959037324412353051075877138m,
+      3135972447545098299460234261m, 4371494653131335197311645996m, 9624249097030609585804826662m,
+      9301461106541282841985626641m, 2793818196182115168911564530m,
+      77683174186957799541255830262m, 4660418590176711545920359433m, 4971145620211324499469864196m,
+      5608211711321183125202150414m, 5617883191736004891949734160m, 7150801075091790966455611144m,
+      5619082524459738931006868492m, 649197923531967450704711664m,
+      75809334407291469990832437230m, 78322691297526401047122740223m, 4348529951871323093202439165m,
+      4990460191572192980035045640m, 5597312470813537077508379404m, 4980755617409140165251173636m,
+      1890741055734852330174483975m, 76772801025035254361275759599m,
+      75502243563200070682362835182m, 78896921543467230670583692029m, 2489164206166677455700101373m,
+      4338830174078735659125311481m, 4960199192571758553533648130m, 3420013420025511569771334658m,
+      1557077491473974933188251927m, 77376040767919248347203368440m,
+      73949978050619586491881614568m, 77043619187199676893167803647m, 1212557245150259869494540530m,
+      3081561358716686153294085872m, 3392217589357453836837847030m, 1219782446916489227407330320m,
+      78580145051212187267589731866m, 75798434925965430405537592305m,
+      68369566912511282590874449920m, 72396532057599326246617936384m, 75186737388538008131054524416m,
+      77027917484951889231108827392m, 73655004947793353634062267392m, 76417372019396591550492896512m,
+      74568981255592060493492515584m, 70529879645288096380279255040m,
+    }.Select(packedTable =>
+      new System.Numerics.BigInteger(packedTable).ToByteArray().Take(12)
+        // Using search max time since it's an integer than initializes to zero and is assgined before being used again 
+        .Select(square => (int)((sbyte)square * 1.461) + _pieceValues[_timeRemaining++ % 12])
+        .ToArray()
     ).ToArray();
 
-  private int RawEvaluation()
-  {
+  int RawEvaluation() {
     int middlegame = 0, endgame = 0, gamephase = 0, sideToMove = 2, piece, square;
     for (; --sideToMove >= 0; middlegame = -middlegame, endgame = -endgame)
-      for (piece = -1; ++piece < 6;)
-        for (ulong mask = _board.GetPieceBitboard((PieceType)piece + 1, sideToMove > 0); mask != 0;)
-        {
-          // Gamephase, middlegame -> endgame
-          gamephase += _phaseWeight[piece];
+    for (piece = -1; ++piece < 6;)
+    for (ulong mask = _board.GetPieceBitboard((PieceType)piece + 1, sideToMove > 0); mask != 0;) {
+      // Gamephase, middlegame -> endgame
+      gamephase += _phaseWeight[piece];
 
-          // Material and square evaluation
-          square = BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ 56 * sideToMove;
-          middlegame += _unpackedPestoTables[square][piece];
-          endgame += _unpackedPestoTables[square][piece + 6];
-        }
+      // Material and square evaluation
+      square = BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ 56 * sideToMove;
+      middlegame += _unpackedPestoTables[square][piece];
+      endgame += _unpackedPestoTables[square][piece + 6];
+    }
+
     // Tempo bonus to help with aspiration windows
-    return (middlegame * gamephase + endgame * (24 - gamephase)) / 24 * (_board.IsWhiteToMove ? 1 : -1) + gamephase / 2;
+    return (middlegame * gamephase + endgame * (24 - gamephase)) / 24 * (_board.IsWhiteToMove ? 1 : -1) +
+           gamephase / 2;
   }
 
-  private int SearchFunction(int searchDepth, int movesMade, int alpha, int beta, bool isNullPossible)
-  {
+  int SearchFunction(int searchDepth, int movesMade, int alpha, int beta, bool isNullPossible) {
     bool isNotRoot = movesMade > 0,
       isCheck = _board.IsInCheck(),
       isQuiescenceSearch = searchDepth <= 0 || movesMade >= 50;
@@ -64,18 +84,16 @@ public class MyBot : IChessBot
       return 0;
     if (_board.IsInCheckmate())
       return movesMade - _maximumScore;
-    var key = (uint)(_board.ZobristKey >> 32);
-    ref var entry = ref _transpositionTable[_board.ZobristKey & _tableEntries];
+    uint key = (uint)(_board.ZobristKey >> 32);
+    ref (uint, short, sbyte, Move, byte) entry = ref _transpositionTable[_board.ZobristKey & _tableEntries];
     int bestScore = -_maximumScore, eval, reduction, i = 0;
     if (isCheck)
       searchDepth++;
 
     bool isEntryKeyCorrect = entry.Item1 == key;
-    var entryScore = entry.Item2;
-    if (isEntryKeyCorrect && entry.Item3 >= searchDepth && isNotRoot)
-    {
-      switch (entry.Item5)
-      {
+    short entryScore = entry.Item2;
+    if (isEntryKeyCorrect && entry.Item3 >= searchDepth && isNotRoot) {
+      switch (entry.Item5) {
         case 0:
           return entryScore;
         case 1:
@@ -85,29 +103,27 @@ public class MyBot : IChessBot
           beta = Math.Min(beta, entryScore);
           break;
       }
+
       if (alpha >= beta)
         return entryScore;
     }
 
     // <quiescence search>
-    if (isQuiescenceSearch)
-    {
+    if (isQuiescenceSearch) {
       bestScore = RawEvaluation();
       if (bestScore > alpha)
         alpha = bestScore;
-      if (alpha >= beta || movesMade >= 50 )
+      if (alpha >= beta || movesMade >= 50)
         return alpha;
     }
     // </quiescence search>
-    else if (beta - alpha == 1 && !isCheck)
-    {
+    else if (beta - alpha == 1 && !isCheck) {
       eval = RawEvaluation();
 
       if (searchDepth <= 5 && eval - 100 * searchDepth >= beta)
         return eval;
 
-      if (searchDepth >= 2 && isNullPossible)
-      {
+      if (searchDepth >= 2 && isNullPossible) {
         _board.TrySkipTurn();
         Search(alpha + 1, 3, false);
         _board.UndoSkipTurn();
@@ -120,24 +136,23 @@ public class MyBot : IChessBot
     Move bestMove = isEntryKeyCorrect ? entry.Item4 : Move.NullMove;
     Span<Move> legalMoves = stackalloc Move[256];
     _board.GetLegalMovesNonAlloc(ref legalMoves, isQuiescenceSearch);
-    foreach (Move move in legalMoves)
-    {
+    foreach (Move move in legalMoves) {
       // <hash Move />
       _moveScores[i++] = -(move == bestMove
         ? 90000000
         : move.IsCapture
-        ? 10000000 * (int)move.CapturePieceType - (int)move.MovePieceType
-        : _killerMoves[movesMade] == move
-        ? 999999
-        : _moveHistoryTable[movesMade & 1, (int)move.MovePieceType, move.TargetSquare.Index]);
+          ? 10000000 * (int)move.CapturePieceType - (int)move.MovePieceType
+          : _killerMoves[movesMade] == move
+            ? 999999
+            : _moveHistoryTable[movesMade & 1, (int)move.MovePieceType, move.TargetSquare.Index]);
     }
+
     // </rank moves>
     _moveScores.AsSpan(0, legalMoves.Length).Sort(legalMoves);
 
     i = 0;
     // <tree search>
-    foreach (Move move in legalMoves)
-    {
+    foreach (Move move in legalMoves) {
       _board.MakeMove(move);
       bool isQuiet = !(move.IsCapture || move.IsPromotion || _board.IsInCheck());
       reduction = ++i <= 3 || !isQuiet || isCheck ? 0 : searchDepth / 3;
@@ -150,8 +165,7 @@ public class MyBot : IChessBot
 
       if (eval <= bestScore) continue;
       bestScore = eval;
-      if (eval > alpha)
-      {
+      if (eval > alpha) {
         bestMove = move;
         alpha = eval;
         if (!isNotRoot && alpha != _maximumScore)
@@ -159,19 +173,20 @@ public class MyBot : IChessBot
       }
 
       if (eval < beta) continue;
-      if (isQuiet)
-      {
+      if (isQuiet) {
         _moveHistoryTable[movesMade & 1, (int)move.MovePieceType, move.TargetSquare.Index] += 1 << searchDepth;
         _killerMoves[movesMade] = move;
       }
+
       break;
     }
+
     // </tree search>
     entry = new(key,
-                (short)bestScore,
-                (sbyte)searchDepth,
-                bestMove,
-                (byte)(bestScore >= beta ? 1 : bestScore <= alpha ? 2 : 0));
+      (short)bestScore,
+      (sbyte)searchDepth,
+      bestMove,
+      (byte)(bestScore >= beta ? 1 : bestScore <= alpha ? 2 : 0));
 
     return bestScore;
 
@@ -185,8 +200,7 @@ public class MyBot : IChessBot
         nullMove);
   }
 
-  public Move Think(Board b, Timer t)
-  {
+  public Move Think(Board b, Timer t) {
     _board = b;
     _timer = t;
     _moveHistoryTable = new int[2, 7, 64];
@@ -194,20 +208,19 @@ public class MyBot : IChessBot
     for (int alpha = -_maximumScore,
          beta = _maximumScore,
          depth = 1;
-         _timer.MillisecondsElapsedThisTurn < _timeRemaining / 2;)
-    {
-      var score = SearchFunction(depth, 0, alpha, beta, false);
+         _timer.MillisecondsElapsedThisTurn < _timeRemaining / 2;) {
+      int score = SearchFunction(depth, 0, alpha, beta, false);
       if (score < alpha)
         alpha = -_maximumScore;
       else if (score > beta)
         beta = _maximumScore;
-      else
-      {
+      else {
         alpha = score - 343;
         beta = score + 343;
         ++depth;
       }
     }
+
     return _bestMove;
   }
 }
