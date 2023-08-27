@@ -5,18 +5,19 @@ using ChessChallenge.API;
 
 public class MyBot : IChessBot {
   readonly Move[] _killerMoves = new Move[50];
+  readonly int _maximumScore = 30000000;
 
   readonly int[] _pieceValues =
       { 109, 285, 332, 486, 894, 0, 99, 327, 283, 478, 927, 0 },
-    _phaseWeight = { 0, 1, 1, 2, 4, 0 },
     _moveScores = new int[218];
 
-  readonly (uint, short, sbyte, Move, byte)[] _transpositionTable =
-    new (uint, short, sbyte, Move, byte)[0x800000]; // 2^23
+  readonly (uint, short, sbyte, Move, byte)[]
+    _transpositionTable = new (uint, short, sbyte, Move, byte)[0x800000]; // 2^23
 
   readonly int[][] _unpackedPestoTables;
   Move _bestMove;
-  int _timeRemaining, _maximumScore = 3000000;
+  int[,,] _moveHistoryTable;
+  int _timeRemaining;
 
   public MyBot() =>
     // Big table packed with data from premade piece square tables
@@ -54,31 +55,53 @@ public class MyBot : IChessBot {
     ).ToArray();
 
   public Move Think(Board board, Timer timer) {
-    int[,,] moveHistoryTable = new int[2, 7, 64];
+    _moveHistoryTable = new int[2, 7, 64];
     _timeRemaining = timer.MillisecondsRemaining / 50;
     for (int alpha = -_maximumScore,
          beta = _maximumScore,
-         depth = 0;
+         depth = 1;
          timer.MillisecondsElapsedThisTurn < _timeRemaining / 2;) {
-      int score = SearchFunction(depth, 0, alpha, beta, false);
+      int score = SearchFunction(depth, 0, alpha, beta);
       if (score < alpha)
-        alpha = -_maximumScore;
+        alpha -= 100;
       else if (score > beta)
-        beta = _maximumScore;
+        beta += 100;
       else {
-        alpha = score - 343;
-        beta = score + 343;
+        alpha = score - 25;
+        beta = score + 25;
         ++depth;
       }
     }
+
     return _bestMove;
 
-    int SearchFunction(int searchDepth, int movesMade, int alpha, int beta, bool isNullPossible) {
-      bool isNotRoot = ++movesMade > 1,
+    int RawEvaluation() {
+      int middlegame = 0, endgame = 0, gamephase = 0, sideToMove = 2, piece;
+      for (; --sideToMove >= 0; middlegame = -middlegame, endgame = -endgame)
+      for (piece = -1; ++piece < 6;)
+      for (ulong mask = board.GetPieceBitboard((PieceType)piece + 1, sideToMove > 0); mask != 0;) {
+        // Gamephase, middlegame -> endgame
+        gamephase += (0x00042110 >> (piece * 4)) & 0x0F;
+
+        // Material and square evaluation
+        int square = BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ (56 * sideToMove);
+        middlegame += _unpackedPestoTables[square][piece];
+        endgame += _unpackedPestoTables[square][piece + 6];
+      }
+
+      // Tempo bonus to help with aspiration windows
+      return (middlegame * gamephase + endgame * (24 - gamephase)) / 24 * (board.IsWhiteToMove ? 1 : -1) +
+             gamephase / 2;
+    }
+
+    int SearchFunction(int searchDepth, int movesMade, int alpha, int beta) {
+      bool isNotRoot = movesMade > 0,
         isCheck = board.IsInCheck(),
-        isQuiescenceSearch = searchDepth <= 0 || movesMade >= 50;
-      if (board.IsInCheckmate()) return movesMade - _maximumScore;
-      if (board.IsDraw() && isNotRoot) return 0;
+        isQuiescenceSearch = searchDepth <= 0;
+      if (board.IsDraw() && isNotRoot)
+        return 0;
+      if (board.IsInCheckmate())
+        return movesMade - _maximumScore;
       uint key = (uint)(board.ZobristKey >> 32);
       ref var entry = ref _transpositionTable[board.ZobristKey & 0x7fffff];
       int bestScore = -_maximumScore, eval, reduction, i = 0;
@@ -106,10 +129,10 @@ public class MyBot : IChessBot {
       // <quiescence search>
       if (isQuiescenceSearch) {
         bestScore = RawEvaluation();
+        if (bestScore >= beta)
+          return bestScore;
         if (bestScore > alpha)
           alpha = bestScore;
-        if (alpha >= beta || movesMade >= 50)
-          return alpha;
       }
       // </quiescence search>
       else if (beta - alpha == 1 && !isCheck) {
@@ -118,9 +141,9 @@ public class MyBot : IChessBot {
         if (searchDepth <= 5 && eval - 100 * searchDepth >= beta)
           return eval;
 
-        if (searchDepth >= 2 && isNullPossible) {
+        if (searchDepth >= 2) {
           board.TrySkipTurn();
-          Search(alpha + 1, 3, false);
+          Search(alpha + 1, 3);
           board.UndoSkipTurn();
           if (eval >= beta)
             return eval;
@@ -129,76 +152,59 @@ public class MyBot : IChessBot {
 
       // <rank moves>
       var bestMove = isEntryKeyCorrect ? entry.Item4 : Move.NullMove;
-      Span<Move> moveList = stackalloc Move[256];
-      board.GetLegalMovesNonAlloc(ref moveList, isQuiescenceSearch);
-      foreach (var move in moveList)
+      Span<Move> legalMoves = stackalloc Move[256];
+      board.GetLegalMovesNonAlloc(ref legalMoves, isQuiescenceSearch);
+      foreach (var move in legalMoves)
         // <hash Move />
         _moveScores[i++] = -(move == bestMove
-          ? 10000000
+          ? 90000000
           : move.IsCapture
-            ? 10000 * (int)move.CapturePieceType - (int)move.MovePieceType
+            ? 100000 * (int)move.CapturePieceType - (int)move.MovePieceType
             : _killerMoves[movesMade] == move
-              ? 99999
-              : 0);
-
+              ? 999999
+              : _moveHistoryTable[movesMade & 1, (int)move.MovePieceType, move.TargetSquare.Index]);
       // </rank moves>
-      _moveScores.AsSpan(0, moveList.Length).Sort(moveList);
+      _moveScores.AsSpan(0, legalMoves.Length).Sort(legalMoves);
+
       i = 0;
       // <tree search>
-      foreach (var move in moveList) {
+      foreach (var move in legalMoves) {
         board.MakeMove(move);
         bool isQuiet = !(move.IsCapture || move.IsPromotion || board.IsInCheck());
         reduction = ++i <= 3 || !isQuiet || isCheck ? 0 : searchDepth / 3;
-        if ((isQuiescenceSearch || i == 1 ? eval = alpha + 1 : Search(alpha + 1, reduction)) > alpha) Search(beta);
+        if ((isQuiescenceSearch || i == 1 ? eval = alpha + 1 : Search(alpha + 1, reduction)) > alpha)
+          Search(beta);
         board.UndoMove(move);
 
         if (timer.MillisecondsElapsedThisTurn > _timeRemaining && movesMade > 2)
           return _maximumScore;
+
         if (eval <= bestScore) continue;
         bestScore = eval;
-        if (eval <= alpha) continue;
-        bestMove = move;
-        alpha = eval;
-        if (!isNotRoot && alpha != _maximumScore)
-          _bestMove = bestMove;
+        if (eval > alpha) {
+          bestMove = move;
+          alpha = eval;
+          if (!isNotRoot && alpha != _maximumScore)
+            _bestMove = bestMove;
+        }
+
         if (eval < beta) continue;
         if (isQuiet) {
-          moveHistoryTable[movesMade & 1, (int)move.MovePieceType, move.TargetSquare.Index] += 1 << searchDepth;
+          _moveHistoryTable[movesMade & 1, (int)move.MovePieceType, move.TargetSquare.Index] += 1 << searchDepth;
           _killerMoves[movesMade] = move;
         }
+
         break;
       }
 
       // </tree search>
-      entry = new(key,
-        (short)bestScore,
-        (sbyte)searchDepth,
-        bestMove,
+      entry = new(key, (short)bestScore, (sbyte)searchDepth, bestMove,
         (byte)(bestScore >= beta ? 1 : bestScore <= alpha ? 2 : 0));
 
       return bestScore;
 
-      int Search(int inputBeta, int r = 0, bool nullMove = true) =>
-        eval = -SearchFunction(searchDepth - 1 - r, movesMade, -inputBeta, -alpha, nullMove);
-    }
-
-    int RawEvaluation() {
-      int middlegame = 0, endgame = 0, gamephase = 0, sideToMove = 2, piece;
-      for (; --sideToMove >= 0; middlegame = -middlegame, endgame = -endgame)
-      for (piece = -1; ++piece < 6;)
-      for (ulong mask = board.GetPieceBitboard((PieceType)piece + 1, sideToMove > 0); mask != 0;) {
-        // Gamephase, middlegame -> endgame
-        gamephase += _phaseWeight[piece];
-
-        // Material and square evaluation
-        int square = BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ (56 * sideToMove);
-        middlegame += _unpackedPestoTables[square][piece];
-        endgame += _unpackedPestoTables[square][piece + 6];
-      }
-
-      // Tempo bonus to help with aspiration windows
-      return (middlegame * gamephase + endgame * (24 - gamephase)) / 24 * (board.IsWhiteToMove ? 1 : -1) +
-             gamephase / 2;
+      int Search(int inputBeta, int r = 0) =>
+        eval = -SearchFunction(searchDepth - 1 - r, movesMade + 1, -inputBeta, -alpha);
     }
   }
 }
